@@ -12,3 +12,12 @@ path = "src/lib.rs"
 phf = { version = "0.8.0", features = ["macros"] }
 encoding = "0.2.33"
 bitvec = "0.18.3"
+structopt = { version = "0.3.17", optional = true }
+
+[features]
+build-binary = ["structopt"]
+
+[[bin]]
+name = "qrgen"
+path = "src/bin.rs"
+required-features = ["build-binary"]
