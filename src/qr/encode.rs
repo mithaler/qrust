@@ -513,6 +513,8 @@ mod tests {
             assert_eq!(encoder.codeword_count_before_padding(25), 129);
             assert_eq!(encoder.codeword_count_before_padding(39), 129);
             assert_eq!(encoder.codeword_count_before_padding(40), 129);
+
+            // The bitstream is too long for bitvec! here, LOL
         }
 
         #[test]

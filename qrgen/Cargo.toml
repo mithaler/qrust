@@ -1,0 +1,13 @@
+[package]
+name = "qrgen"
+version = "0.1.0"
+authors = ["mthaler"]
+edition = "2018"
+
+[dependencies]
+qrust = { version = "0.1", path = "../" }
+structopt = "0.3.17"
+
+[[bin]]
+name = "qrgen"
+path = "src/bin.rs"

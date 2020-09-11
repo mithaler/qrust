@@ -4,18 +4,11 @@ version = "0.1.0"
 authors = ["mthaler"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
 name = "qrust"
 path = "src/lib.rs"
-
-[[bin]]
-name = "qrgen"
-path = "src/bin.rs"
 
 [dependencies]
 phf = { version = "0.8.0", features = ["macros"] }
 encoding = "0.2.33"
 bitvec = "0.18.3"
-structopt = "0.3.17"
