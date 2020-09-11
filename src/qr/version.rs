@@ -33,7 +33,7 @@ impl Version {
     }
 }
 
-const VERSIONS: [&'static Version; 40] = [
+const VERSIONS: [&Version; 40] = [
     &Version {
         num: 1,
         l_cap: 19,
