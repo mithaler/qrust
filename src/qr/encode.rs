@@ -1,11 +1,34 @@
+use std::cmp::min;
+
 use bitvec::prelude::*;
 use encoding::all::{ISO_8859_1, UTF_8};
 use encoding::{EncoderTrap, Encoding};
 use phf::phf_map;
-use std::cmp::min;
+
+use QREncoding::*;
+
+use crate::qr::error_correction::ErrorCorrectionLevel;
+use crate::qr::version::Version;
 
 fn div_rem(a: usize, b: usize) -> (usize, usize) {
     (a / b, a % b)
+}
+
+pub type QREncodedData = BitVec<Lsb0, u8>;
+
+fn insert_into_data(data: &mut QREncodedData, mut value: u16, count_bits: usize) {
+    for _ in 0..count_bits {
+        data.push(value & 0b1000_0000_0000_0000 > 0);
+        value <<= 1;
+    }
+}
+
+fn bytes_to_bitvec(data: Vec<u8>) -> QREncodedData {
+    let mut out = BitVec::with_capacity(data.len() * 8);
+    for value in data {
+        insert_into_data(&mut out, (value as u16) << 8, 8);
+    }
+    out
 }
 
 #[derive(PartialEq, Debug)]
@@ -16,7 +39,6 @@ pub enum QREncoding {
     Kanji, // TODO
 }
 
-pub type QREncodedData = BitVec<Lsb0, u8>;
 type QREncodingMap = phf::Map<char, u16>;
 
 static NUMERIC_CHARS: QREncodingMap = phf_map! {
@@ -80,12 +102,6 @@ static ALPHANUMERIC_CHARS: QREncodingMap = phf_map! {
     ':' => 44,
 };
 
-use QREncoding::*;
-
-fn slice_to_bitvec(data: &[u8]) -> QREncodedData {
-    BitVec::<Lsb0, u8>::from_bitslice(BitSlice::from_slice(data).unwrap())
-}
-
 /// Performs encoding in Numeric mode, as described in section 8.4.2 of the spec.
 fn encode_numeric(data: &str) -> QREncodedData {
     let mut cur = data;
@@ -111,11 +127,8 @@ fn encode_numeric(data: &str) -> QREncodedData {
             4
         };
 
-        let mut value = three_digits.parse::<u16>().unwrap() << (16 - bitcount);
-        for _ in 0..bitcount {
-            out.push(0b1000_0000_0000_0000 & value > 0);
-            value <<= 1;
-        }
+        let value = three_digits.parse::<u16>().unwrap() << (16 - bitcount);
+        insert_into_data(&mut out, value, bitcount);
         cur = rest;
     }
     out
@@ -148,10 +161,7 @@ fn encode_alphanumeric(data: &str) -> QREncodedData {
         };
 
         value <<= 16 - bitcount;
-        for _ in 0..bitcount {
-            out.push(0b1000_0000_0000_0000 & value > 0);
-            value <<= 1;
-        }
+        insert_into_data(&mut out, value, bitcount);
         cur = rest;
     }
     out
@@ -163,7 +173,7 @@ fn encode_bytes(data: &str) -> QREncodedData {
         .encode(data, EncoderTrap::Strict)
         .or_else(|_| UTF_8.encode(data, EncoderTrap::Replace))
         .unwrap();
-    slice_to_bitvec(bytes.as_slice())
+    bytes_to_bitvec(bytes)
 }
 
 impl QREncoding {
@@ -185,7 +195,7 @@ impl QREncoding {
         }
     }
 
-    fn _mode(&self) -> QREncodedData {
+    fn mode(&self) -> QREncodedData {
         // Spec: 8.4, Table 2
         match self {
             Numeric => bitvec![Lsb0, u8; 0, 0, 0, 1],
@@ -197,17 +207,17 @@ impl QREncoding {
 
     fn character_count_bits(&self, version_num: u8) -> usize {
         // Spec: 8.4, Table 3
-        let (level_1, level_2, level_3) = match self {
+        let (tier_1, tier_2, tier_3) = match self {
             Numeric => (10, 12, 14),
             Alphanumeric => (9, 11, 13),
             Bytes => (8, 16, 16),
             Kanji => (8, 10, 12),
         };
         match version_num {
-            1..=9 => level_1,
-            10..=26 => level_2,
-            27..=40 => level_3,
-            _ => panic!("Version numbers don't go above 40, silly!"),
+            1..=9 => tier_1,
+            10..=26 => tier_2,
+            27..=40 => tier_3,
+            _ => unreachable!("Version numbers don't go above 40, silly!"),
         }
     }
 }
@@ -239,7 +249,7 @@ fn choose_encoding(data: &str) -> QREncoding {
 pub struct QRBitstreamEncoder {
     pub data: QREncodedData,
     pub encoding: QREncoding,
-    pub character_count: usize,
+    pub character_count: u16,
 }
 
 impl QRBitstreamEncoder {
@@ -249,18 +259,68 @@ impl QRBitstreamEncoder {
         QRBitstreamEncoder {
             data: encoded_data,
             encoding,
-            character_count: data.len(),
+            character_count: data.len() as u16,
         }
     }
 
-    pub fn bitstream_length(&self, version_num: u8) -> usize {
+    fn bitstream_length_before_terminator(&self, version_num: u8) -> usize {
         // mode + character count indicator + data + terminator
         4 + self.encoding.character_count_bits(version_num) + self.data.len()
     }
 
     pub fn codeword_count_before_padding(&self, version_num: u8) -> usize {
-        let character_count_bits = self.bitstream_length(version_num);
+        let character_count_bits = self.bitstream_length_before_terminator(version_num);
         ((character_count_bits + (8 - 1)) / 8) as usize // divide rounding up
+    }
+
+    pub fn bitstream(&mut self, version: &Version, ecl: ErrorCorrectionLevel) -> QREncodedData {
+        let codeword_count = version.codeword_count(ecl);
+        let mut bitstream = BitVec::with_capacity(codeword_count * 8);
+        let mut mode = self.encoding.mode();
+
+        let char_count_value = self.character_count;
+        let char_count_size = self.encoding.character_count_bits(version.num);
+        let mut char_count_indicator = BitVec::with_capacity(char_count_size);
+        insert_into_data(
+            &mut char_count_indicator,
+            char_count_value << (16 - char_count_size),
+            char_count_size,
+        );
+
+        bitstream.append(&mut mode);
+        bitstream.append(&mut char_count_indicator);
+        bitstream.append(&mut self.data);
+
+        // Add the terminator of up to 4 zeroes
+        let remaining_size = codeword_count * 8 - bitstream.len();
+        for _ in 0..(min(4, remaining_size)) {
+            bitstream.push(false);
+        }
+
+        // Finish out the codeword with zeroes
+        let codeword_remainder = bitstream.len() % 8;
+        if codeword_remainder > 0 {
+            for _ in 0..(8 - codeword_remainder) {
+                bitstream.push(false);
+            }
+        }
+
+        // Make sure we haven't somehow gone over (if that happened, there's a bug somewhere!)
+        if bitstream.len() / 8 > codeword_count {
+            panic!(
+                "The data length of {} doesn't fit into the chosen version of {}!",
+                bitstream.len(),
+                version.num
+            );
+        }
+
+        // Pad remaining codewords with a cycle of 0xEC and 0x11
+        let mut padding_cycle = [0xEC00u16, 0x1100u16].iter().cycle();
+        while bitstream.len() / 8 != codeword_count {
+            insert_into_data(&mut bitstream, padding_cycle.next().unwrap().to_owned(), 8);
+        }
+
+        bitstream
     }
 }
 
@@ -325,13 +385,9 @@ mod tests {
             let encoding = choose_encoding(&data);
             assert_eq!(
                 encoding.encode(&data),
-                slice_to_bitvec(
-                    vec![
-                        0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64,
-                        0x21
-                    ]
-                    .as_slice()
-                )
+                bytes_to_bitvec(vec![
+                    0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x21
+                ])
             )
         }
 
@@ -341,29 +397,28 @@ mod tests {
             let encoding = choose_encoding(&data);
             assert_eq!(
                 encoding.encode(&data),
-                slice_to_bitvec(
-                    vec![
-                        208, 159, 209, 128, 208, 184, 208, 178, 208, 181, 209, 130, 44, 32, 208,
-                        188, 208, 184, 209, 128, 33
-                    ]
-                    .as_slice()
-                )
+                bytes_to_bitvec(vec![
+                    208, 159, 209, 128, 208, 184, 208, 178, 208, 181, 209, 130, 44, 32, 208, 188,
+                    208, 184, 209, 128, 33
+                ])
             );
         }
     }
 
     mod encoder {
+        use crate::qr::version::Version;
+
         use super::*;
 
         #[test]
         fn test_numeric() {
-            let encoder = QRBitstreamEncoder::new("12300001010");
-            assert_eq!(encoder.bitstream_length(1), 51);
-            assert_eq!(encoder.bitstream_length(9), 51);
-            assert_eq!(encoder.bitstream_length(10), 53);
-            assert_eq!(encoder.bitstream_length(25), 53);
-            assert_eq!(encoder.bitstream_length(39), 55);
-            assert_eq!(encoder.bitstream_length(40), 55);
+            let mut encoder = QRBitstreamEncoder::new("12300001010");
+            assert_eq!(encoder.bitstream_length_before_terminator(1), 51);
+            assert_eq!(encoder.bitstream_length_before_terminator(9), 51);
+            assert_eq!(encoder.bitstream_length_before_terminator(10), 53);
+            assert_eq!(encoder.bitstream_length_before_terminator(25), 53);
+            assert_eq!(encoder.bitstream_length_before_terminator(39), 55);
+            assert_eq!(encoder.bitstream_length_before_terminator(40), 55);
 
             assert_eq!(encoder.codeword_count_before_padding(1), 7);
             assert_eq!(encoder.codeword_count_before_padding(9), 7);
@@ -371,17 +426,33 @@ mod tests {
             assert_eq!(encoder.codeword_count_before_padding(25), 7);
             assert_eq!(encoder.codeword_count_before_padding(39), 7);
             assert_eq!(encoder.codeword_count_before_padding(40), 7);
+
+            assert_eq!(
+                encoder.bitstream(Version::by_num(1), ErrorCorrectionLevel::Medium),
+                bitvec![Lsb0, u8;
+                    0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0,
+                    0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1,
+                    0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1,
+                    1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0
+                ]
+            )
         }
 
         #[test]
         fn test_alphanumeric() {
-            let encoder = QRBitstreamEncoder::new("12300001010AGASSLKDJOAKSJDGPIOIASDFGKJAHSSDGFKJHSDGLKJSHDLJKFHSDFJ  SDKLJFHSLKDJFHSLKDJHFLSDJKHF");
-            assert_eq!(encoder.bitstream_length(1), 541);
-            assert_eq!(encoder.bitstream_length(9), 541);
-            assert_eq!(encoder.bitstream_length(10), 543);
-            assert_eq!(encoder.bitstream_length(25), 543);
-            assert_eq!(encoder.bitstream_length(39), 545);
-            assert_eq!(encoder.bitstream_length(40), 545);
+            let mut encoder = QRBitstreamEncoder::new(
+                "12300001010\
+                AGASSLKDJOAKSJDGPIOIASDFGKJAHSSDGFKJHSDGLKJSHDLJKFHSDFJ  \
+                SDKLJFHSLKDJFHSLKDJHFLSDJKHF",
+            );
+
+            assert_eq!(encoder.bitstream_length_before_terminator(1), 541);
+            assert_eq!(encoder.bitstream_length_before_terminator(9), 541);
+            assert_eq!(encoder.bitstream_length_before_terminator(10), 543);
+            assert_eq!(encoder.bitstream_length_before_terminator(25), 543);
+            assert_eq!(encoder.bitstream_length_before_terminator(39), 545);
+            assert_eq!(encoder.bitstream_length_before_terminator(40), 545);
 
             assert_eq!(encoder.codeword_count_before_padding(1), 68);
             assert_eq!(encoder.codeword_count_before_padding(9), 68);
@@ -389,17 +460,52 @@ mod tests {
             assert_eq!(encoder.codeword_count_before_padding(25), 68);
             assert_eq!(encoder.codeword_count_before_padding(39), 69);
             assert_eq!(encoder.codeword_count_before_padding(40), 69);
+
+            assert_eq!(
+                encoder.bitstream(Version::by_num(5), ErrorCorrectionLevel::Medium),
+                bitvec![Lsb0, u8;
+                    0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0,
+                    0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1,
+                    0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1,
+                    1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0,
+                    0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0,
+                    0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0,
+                    0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0,
+                    0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1,
+                    0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0,
+                    1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0,
+                    0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0,
+                    0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1,
+                    0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0,
+                    1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0,
+                    1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0,
+                    0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1,
+                    0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0,
+                    0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1,
+                    0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0,
+                    1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0,
+                    1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0,
+                    0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0,
+                    0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1,
+                    1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1,
+                    0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0
+                ]
+            )
         }
 
         #[test]
         fn test_bytes() {
-            let encoder = QRBitstreamEncoder::new("Golden ratio φ = 1.6180339887498948482045868343656381177203091798057628621354486227052604628189024497072072041893911374......");
-            assert_eq!(encoder.bitstream_length(1), 1020);
-            assert_eq!(encoder.bitstream_length(9), 1020);
-            assert_eq!(encoder.bitstream_length(10), 1028);
-            assert_eq!(encoder.bitstream_length(25), 1028);
-            assert_eq!(encoder.bitstream_length(39), 1028);
-            assert_eq!(encoder.bitstream_length(40), 1028);
+            let encoder = QRBitstreamEncoder::new(
+                "Golden ratio φ = 1.6180339887498948482045868343656381177203091798057628621354486227052604628189024497072072041893911374......"
+            );
+            assert_eq!(encoder.bitstream_length_before_terminator(1), 1020);
+            assert_eq!(encoder.bitstream_length_before_terminator(9), 1020);
+            assert_eq!(encoder.bitstream_length_before_terminator(10), 1028);
+            assert_eq!(encoder.bitstream_length_before_terminator(25), 1028);
+            assert_eq!(encoder.bitstream_length_before_terminator(39), 1028);
+            assert_eq!(encoder.bitstream_length_before_terminator(40), 1028);
 
             assert_eq!(encoder.codeword_count_before_padding(1), 128);
             assert_eq!(encoder.codeword_count_before_padding(9), 128);
@@ -407,6 +513,21 @@ mod tests {
             assert_eq!(encoder.codeword_count_before_padding(25), 129);
             assert_eq!(encoder.codeword_count_before_padding(39), 129);
             assert_eq!(encoder.codeword_count_before_padding(40), 129);
+        }
+
+        #[test]
+        fn test_bytes_bitstream() {
+            let mut encoder = QRBitstreamEncoder::new("aЉ윇😱");
+            assert_eq!(
+                encoder.bitstream(Version::by_num(2), ErrorCorrectionLevel::High),
+                bitvec![Lsb0, u8;
+                    0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0,
+                    0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0,
+                    1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0,
+                    0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0,
+                    0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1
+                ]
+            )
         }
     }
 }

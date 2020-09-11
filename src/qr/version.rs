@@ -18,6 +18,15 @@ impl Version {
         VERSIONS[num - 1]
     }
 
+    pub fn codeword_count(&self, ecl: ErrorCorrectionLevel) -> usize {
+        match ecl {
+            ErrorCorrectionLevel::Low => self.l_cap,
+            ErrorCorrectionLevel::Medium => self.m_cap,
+            ErrorCorrectionLevel::Quartile => self.q_cap,
+            ErrorCorrectionLevel::High => self.h_cap,
+        }
+    }
+
     /// Returns the number of modules on a single side of the finished QR code.
     pub fn modules_per_side(&self) -> u32 {
         (4 * (self.num as u32 - 1)) + 21
