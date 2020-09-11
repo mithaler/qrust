@@ -12,8 +12,8 @@ fn div_rem(a: usize, b: usize) -> (usize, usize) {
 pub enum QREncoding {
     Numeric,
     Alphanumeric,
-    Byte,
-    // Kanji not supported yet!
+    Bytes,
+    Kanji, // TODO
 }
 
 pub type QREncodedData = BitVec<Lsb0, u8>;
@@ -86,6 +86,7 @@ fn slice_to_bitvec(data: &[u8]) -> QREncodedData {
     BitVec::<Lsb0, u8>::from_bitslice(BitSlice::from_slice(data).unwrap())
 }
 
+/// Performs encoding in Numeric mode, as described in section 8.4.2 of the spec.
 fn encode_numeric(data: &str) -> QREncodedData {
     let mut cur = data;
     let (tria, remainder) = div_rem(data.len(), 2);
@@ -101,7 +102,6 @@ fn encode_numeric(data: &str) -> QREncodedData {
     );
     while !cur.is_empty() {
         let (three_digits, rest) = cur.split_at(min(3, cur.len()));
-        println!("number {}", three_digits);
 
         let bitcount = if !rest.is_empty() || three_digits.len() == 3 {
             10
@@ -112,7 +112,6 @@ fn encode_numeric(data: &str) -> QREncodedData {
         };
 
         let mut value = three_digits.parse::<u16>().unwrap() << (16 - bitcount);
-        println!("binary {:0>16b}", value);
         for _ in 0..bitcount {
             out.push(0b1000_0000_0000_0000 & value > 0);
             value <<= 1;
@@ -122,6 +121,7 @@ fn encode_numeric(data: &str) -> QREncodedData {
     out
 }
 
+/// Performs encoding in Alphanumeric mode, as described in section 8.4.3 of the spec.
 fn encode_alphanumeric(data: &str) -> QREncodedData {
     let mut cur = data;
     let (pairs, remainder) = div_rem(data.len(), 2);
@@ -130,7 +130,6 @@ fn encode_alphanumeric(data: &str) -> QREncodedData {
     while !cur.is_empty() {
         let (two_letters, rest) = cur.split_at(min(2, cur.len()));
         let mut chars = two_letters.chars();
-        println!("pair {}", two_letters);
 
         let (mut value, bitcount) = if two_letters.len() == 2 {
             (
@@ -148,7 +147,6 @@ fn encode_alphanumeric(data: &str) -> QREncodedData {
             )
         };
 
-        println!("binary {:0>16b}", value);
         value <<= 16 - bitcount;
         for _ in 0..bitcount {
             out.push(0b1000_0000_0000_0000 & value > 0);
@@ -159,6 +157,7 @@ fn encode_alphanumeric(data: &str) -> QREncodedData {
     out
 }
 
+/// Performs encoding in Bytes mode, as described in section 8.4.4 of the spec.
 fn encode_bytes(data: &str) -> QREncodedData {
     let bytes = ISO_8859_1
         .encode(data, EncoderTrap::Strict)
@@ -172,7 +171,8 @@ impl QREncoding {
         match self {
             Numeric => NUMERIC_CHARS.contains_key(character),
             Alphanumeric => ALPHANUMERIC_CHARS.contains_key(character),
-            Byte => true,
+            Bytes => true,
+            _ => unimplemented!(),
         }
     }
 
@@ -180,20 +180,41 @@ impl QREncoding {
         match self {
             Numeric => encode_numeric(data),
             Alphanumeric => encode_alphanumeric(data),
-            Byte => encode_bytes(data),
+            Bytes => encode_bytes(data),
+            _ => unimplemented!(),
         }
     }
 
-    fn mode(&self) -> QREncodedData {
+    fn _mode(&self) -> QREncodedData {
+        // Spec: 8.4, Table 2
         match self {
             Numeric => bitvec![Lsb0, u8; 0, 0, 0, 1],
             Alphanumeric => bitvec![Lsb0, u8; 0, 0, 1, 0],
-            Byte => bitvec![Lsb0, u8; 0, 1, 0, 0],
+            Bytes => bitvec![Lsb0, u8; 0, 1, 0, 0],
+            _ => unimplemented!(),
+        }
+    }
+
+    fn character_count_bits(&self, version_num: u8) -> usize {
+        // Spec: 8.4, Table 3
+        let (level_1, level_2, level_3) = match self {
+            Numeric => (10, 12, 14),
+            Alphanumeric => (9, 11, 13),
+            Bytes => (8, 16, 16),
+            Kanji => (8, 10, 12),
+        };
+        match version_num {
+            1..=9 => level_1,
+            10..=26 => level_2,
+            27..=40 => level_3,
+            _ => panic!("Version numbers don't go above 40, silly!"),
         }
     }
 }
 
-pub fn choose_encoding(data: &str) -> QREncoding {
+/// Selects the encoding based on the input data. Currently Kanji mode is unsupported.
+/// ECI mode support is possible in the future, I suppose, but unlikely.
+fn choose_encoding(data: &str) -> QREncoding {
     let mut can_be_numeric = true;
     let mut can_be_alphanumeric = true;
     for char in data.chars() {
@@ -210,7 +231,36 @@ pub fn choose_encoding(data: &str) -> QREncoding {
     } else if can_be_alphanumeric {
         Alphanumeric
     } else {
-        Byte
+        Bytes
+    }
+}
+
+#[derive(Debug)]
+pub struct QRBitstreamEncoder {
+    pub data: QREncodedData,
+    pub encoding: QREncoding,
+    pub character_count: usize,
+}
+
+impl QRBitstreamEncoder {
+    pub fn new(data: &str) -> QRBitstreamEncoder {
+        let encoding = choose_encoding(&data);
+        let encoded_data = encoding.encode(&data);
+        QRBitstreamEncoder {
+            data: encoded_data,
+            encoding,
+            character_count: data.len(),
+        }
+    }
+
+    pub fn bitstream_length(&self, version_num: u8) -> usize {
+        // mode + character count indicator + data + terminator
+        4 + self.encoding.character_count_bits(version_num) + self.data.len()
+    }
+
+    pub fn codeword_count_before_padding(&self, version_num: u8) -> usize {
+        let character_count_bits = self.bitstream_length(version_num);
+        ((character_count_bits + (8 - 1)) / 8) as usize // divide rounding up
     }
 }
 
@@ -222,9 +272,9 @@ mod tests {
     fn test_choose_encoding() {
         assert_eq!(choose_encoding("0051023159"), Numeric);
         assert_eq!(choose_encoding("0051023159 ASDABGVASXD$-"), Alphanumeric);
-        assert_eq!(choose_encoding("00510231 59asfasdASDASFGAQS"), Byte);
-        assert_eq!(choose_encoding("I am the Code"), Byte);
-        assert_eq!(choose_encoding("Привет, мир!"), Byte);
+        assert_eq!(choose_encoding("00510231 59asfasdASDASFGAQS"), Bytes);
+        assert_eq!(choose_encoding("I am the Code"), Bytes);
+        assert_eq!(choose_encoding("Привет, мир!"), Bytes);
     }
 
     mod numeric {
@@ -299,6 +349,64 @@ mod tests {
                     .as_slice()
                 )
             );
+        }
+    }
+
+    mod encoder {
+        use super::*;
+
+        #[test]
+        fn test_numeric() {
+            let encoder = QRBitstreamEncoder::new("12300001010");
+            assert_eq!(encoder.bitstream_length(1), 51);
+            assert_eq!(encoder.bitstream_length(9), 51);
+            assert_eq!(encoder.bitstream_length(10), 53);
+            assert_eq!(encoder.bitstream_length(25), 53);
+            assert_eq!(encoder.bitstream_length(39), 55);
+            assert_eq!(encoder.bitstream_length(40), 55);
+
+            assert_eq!(encoder.codeword_count_before_padding(1), 7);
+            assert_eq!(encoder.codeword_count_before_padding(9), 7);
+            assert_eq!(encoder.codeword_count_before_padding(10), 7);
+            assert_eq!(encoder.codeword_count_before_padding(25), 7);
+            assert_eq!(encoder.codeword_count_before_padding(39), 7);
+            assert_eq!(encoder.codeword_count_before_padding(40), 7);
+        }
+
+        #[test]
+        fn test_alphanumeric() {
+            let encoder = QRBitstreamEncoder::new("12300001010AGASSLKDJOAKSJDGPIOIASDFGKJAHSSDGFKJHSDGLKJSHDLJKFHSDFJ  SDKLJFHSLKDJFHSLKDJHFLSDJKHF");
+            assert_eq!(encoder.bitstream_length(1), 541);
+            assert_eq!(encoder.bitstream_length(9), 541);
+            assert_eq!(encoder.bitstream_length(10), 543);
+            assert_eq!(encoder.bitstream_length(25), 543);
+            assert_eq!(encoder.bitstream_length(39), 545);
+            assert_eq!(encoder.bitstream_length(40), 545);
+
+            assert_eq!(encoder.codeword_count_before_padding(1), 68);
+            assert_eq!(encoder.codeword_count_before_padding(9), 68);
+            assert_eq!(encoder.codeword_count_before_padding(10), 68);
+            assert_eq!(encoder.codeword_count_before_padding(25), 68);
+            assert_eq!(encoder.codeword_count_before_padding(39), 69);
+            assert_eq!(encoder.codeword_count_before_padding(40), 69);
+        }
+
+        #[test]
+        fn test_bytes() {
+            let encoder = QRBitstreamEncoder::new("Golden ratio φ = 1.6180339887498948482045868343656381177203091798057628621354486227052604628189024497072072041893911374......");
+            assert_eq!(encoder.bitstream_length(1), 1020);
+            assert_eq!(encoder.bitstream_length(9), 1020);
+            assert_eq!(encoder.bitstream_length(10), 1028);
+            assert_eq!(encoder.bitstream_length(25), 1028);
+            assert_eq!(encoder.bitstream_length(39), 1028);
+            assert_eq!(encoder.bitstream_length(40), 1028);
+
+            assert_eq!(encoder.codeword_count_before_padding(1), 128);
+            assert_eq!(encoder.codeword_count_before_padding(9), 128);
+            assert_eq!(encoder.codeword_count_before_padding(10), 129);
+            assert_eq!(encoder.codeword_count_before_padding(25), 129);
+            assert_eq!(encoder.codeword_count_before_padding(39), 129);
+            assert_eq!(encoder.codeword_count_before_padding(40), 129);
         }
     }
 }
