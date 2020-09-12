@@ -294,7 +294,7 @@ impl QRBitstreamEncoder {
 
         // Make sure we haven't somehow gone over (if that happened, there's a bug somewhere!)
         if bitstream.len() / 8 > codeword_count {
-            return Err(Cow::Owned(format!(
+            return Err(Cow::from(format!(
                 "The data length of {} doesn't fit into the chosen version of {}!",
                 bitstream.len(),
                 version.num
@@ -317,11 +317,9 @@ impl QRBitstreamEncoder {
     ) -> Result<Vec<u8>, Error> {
         let bitstream = self.bitstream(&version, &ecl)?;
         if bitstream.len() % 8 != 0 {
-            Err(Cow::Borrowed(
-                "The bitstream didn't come out in even bytes!",
-            ))
+            Err(Cow::from("The bitstream didn't come out in even bytes!"))
         } else if bitstream.len() / 8 != version.codeword_count(&ecl) {
-            Err(Cow::Borrowed(
+            Err(Cow::from(
                 "The bitstream doesn't have the right number of codewords for the chosen version!",
             ))
         } else {
