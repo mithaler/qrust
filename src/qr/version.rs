@@ -6,14 +6,14 @@ use crate::qr::Error;
 
 #[derive(Debug)]
 pub struct VersionGroup {
-    blocks: u16,
-    codewords: u16,
+    blocks: u8,
+    codewords: u8,
 }
 
 #[derive(Debug)]
 pub struct VersionEclData {
     data_codewords: usize,
-    ec_codewords_per_block: u16,
+    ec_codewords_per_block: u8,
     group1: VersionGroup,
     group2: Option<VersionGroup>,
 }
@@ -2020,6 +2020,22 @@ pub fn choose_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_codewords_add_up() {
+        // This really only checks that the table was copied correctly from the spec
+        for ver in VERSIONS.iter() {
+            for ecl in &[&ver.l_data, &ver.m_data, &ver.q_data, &ver.h_data] {
+                let group1 = ecl.group1.codewords as usize * ecl.group1.blocks as usize;
+                let group2 = ecl
+                    .group2
+                    .as_ref()
+                    .map(|grp| grp.codewords as usize * grp.blocks as usize)
+                    .unwrap_or(0);
+                assert_eq!(group1 + group2, ecl.data_codewords);
+            }
+        }
+    }
 
     #[test]
     fn test_modules_per_side() {
