@@ -3,6 +3,7 @@ name = "qrust"
 version = "0.1.0"
 authors = ["mthaler"]
 edition = "2018"
+exclude = ["/fixtures"]
 
 [lib]
 name = "qrust"
@@ -12,6 +13,10 @@ path = "src/lib.rs"
 encoding = "0.2.33"
 bitvec = "0.18.3"
 structopt = { version = "0.3.17", optional = true }
+
+[dev-dependencies]
+serde = { version = "1.0.116", features = ["derive"] }
+serde_yaml = "0.8.13"
 
 [features]
 build-binary = ["structopt"]
