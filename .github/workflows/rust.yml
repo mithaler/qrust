@@ -16,8 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-    - name: Build
-      run: cargo build --verbose
+    - name: Build (including binary)
+      run: cargo build --features build-binary --bin qrgen --verbose
     - name: Run Clippy
       run: cargo clippy
     - name: Run tests
