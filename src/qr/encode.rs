@@ -3,7 +3,6 @@ use std::cmp::min;
 use bitvec::prelude::*;
 use encoding::all::{ISO_8859_1, UTF_8};
 use encoding::{EncoderTrap, Encoding};
-use phf::phf_map;
 
 use QREncoding::*;
 
@@ -39,68 +38,56 @@ pub enum QREncoding {
     Kanji, // TODO
 }
 
-type QREncodingMap = phf::Map<char, u16>;
-
-static NUMERIC_CHARS: QREncodingMap = phf_map! {
-    '0' => 0,
-    '1' => 1,
-    '2' => 2,
-    '3' => 3,
-    '4' => 4,
-    '5' => 5,
-    '6' => 6,
-    '7' => 7,
-    '8' => 8,
-    '9' => 9,
-};
-
-static ALPHANUMERIC_CHARS: QREncodingMap = phf_map! {
-    '0' => 0,
-    '1' => 1,
-    '2' => 2,
-    '3' => 3,
-    '4' => 4,
-    '5' => 5,
-    '6' => 6,
-    '7' => 7,
-    '8' => 8,
-    '9' => 9,
-    'A' => 10,
-    'B' => 11,
-    'C' => 12,
-    'D' => 13,
-    'E' => 14,
-    'F' => 15,
-    'G' => 16,
-    'H' => 17,
-    'I' => 18,
-    'J' => 19,
-    'K' => 20,
-    'L' => 21,
-    'M' => 22,
-    'N' => 23,
-    'O' => 24,
-    'P' => 25,
-    'Q' => 26,
-    'R' => 27,
-    'S' => 28,
-    'T' => 29,
-    'U' => 30,
-    'V' => 31,
-    'W' => 32,
-    'X' => 33,
-    'Y' => 34,
-    'Z' => 35,
-    ' ' => 36,
-    '$' => 37,
-    '%' => 38,
-    '*' => 39,
-    '+' => 40,
-    '-' => 41,
-    '.' => 42,
-    '/' => 43,
-    ':' => 44,
-};
+fn alphanumeric_char_value(character: &char) -> Option<u16> {
+    match character {
+        '0' => Some(0),
+        '1' => Some(1),
+        '2' => Some(2),
+        '3' => Some(3),
+        '4' => Some(4),
+        '5' => Some(5),
+        '6' => Some(6),
+        '7' => Some(7),
+        '8' => Some(8),
+        '9' => Some(9),
+        'A' => Some(10),
+        'B' => Some(11),
+        'C' => Some(12),
+        'D' => Some(13),
+        'E' => Some(14),
+        'F' => Some(15),
+        'G' => Some(16),
+        'H' => Some(17),
+        'I' => Some(18),
+        'J' => Some(19),
+        'K' => Some(20),
+        'L' => Some(21),
+        'M' => Some(22),
+        'N' => Some(23),
+        'O' => Some(24),
+        'P' => Some(25),
+        'Q' => Some(26),
+        'R' => Some(27),
+        'S' => Some(28),
+        'T' => Some(29),
+        'U' => Some(30),
+        'V' => Some(31),
+        'W' => Some(32),
+        'X' => Some(33),
+        'Y' => Some(34),
+        'Z' => Some(35),
+        ' ' => Some(36),
+        '$' => Some(37),
+        '%' => Some(38),
+        '*' => Some(39),
+        '+' => Some(40),
+        '-' => Some(41),
+        '.' => Some(42),
+        '/' => Some(43),
+        ':' => Some(44),
+        _ => None,
+    }
+}
 
 /// Performs encoding in Numeric mode, as described in section 8.4.2 of the spec.
 fn encode_numeric(data: &str) -> QREncodedData {
@@ -146,18 +133,12 @@ fn encode_alphanumeric(data: &str) -> QREncodedData {
 
         let (mut value, bitcount) = if two_letters.len() == 2 {
             (
-                ALPHANUMERIC_CHARS.get(&chars.next().unwrap()).unwrap() * 45
-                    + ALPHANUMERIC_CHARS.get(&chars.next().unwrap()).unwrap(),
+                alphanumeric_char_value(&chars.next().unwrap()).unwrap() * 45
+                    + alphanumeric_char_value(&chars.next().unwrap()).unwrap(),
                 11,
             )
         } else {
-            (
-                ALPHANUMERIC_CHARS
-                    .get(&chars.next().unwrap())
-                    .unwrap()
-                    .to_owned(),
-                6,
-            )
+            (alphanumeric_char_value(&chars.next().unwrap()).unwrap(), 6)
         };
 
         value <<= 16 - bitcount;
@@ -179,8 +160,8 @@ fn encode_bytes(data: &str) -> QREncodedData {
 impl QREncoding {
     fn allows_char(&self, character: &char) -> bool {
         match self {
-            Numeric => NUMERIC_CHARS.contains_key(character),
-            Alphanumeric => ALPHANUMERIC_CHARS.contains_key(character),
+            Numeric => character.is_digit(10),
+            Alphanumeric => alphanumeric_char_value(&character).is_some(),
             Bytes => true,
             _ => unimplemented!(),
         }
