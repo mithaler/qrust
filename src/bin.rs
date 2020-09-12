@@ -6,6 +6,7 @@ use structopt::StructOpt;
 
 use qrust::create_qr_code;
 use qrust::qr::error_correction::ErrorCorrectionLevel;
+use qrust::qr::Error;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "qrgen", about = "Generate a QR code")]
@@ -25,7 +26,7 @@ struct Opts {
     ecl: Option<ErrorCorrectionLevel>,
 }
 
-fn run(opts: Opts) -> Result<(), String> {
+fn run(opts: Opts) -> Result<(), Error> {
     let mut input_stream: Box<dyn io::Read> = match opts.input {
         None => Box::new(io::stdin()),
         Some(i) => Box::new(File::open(i).map_err(|e| e.to_string())?),

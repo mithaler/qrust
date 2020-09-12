@@ -1,5 +1,8 @@
+use std::borrow::Cow;
+
 use crate::qr::encode::QRBitstreamEncoder;
 use crate::qr::error_correction::ErrorCorrectionLevel;
+use crate::qr::Error;
 
 /// A QR code version. All caps are codeword counts.
 #[derive(Debug)]
@@ -18,7 +21,7 @@ impl Version {
         VERSIONS[num - 1]
     }
 
-    pub fn codeword_count(&self, ecl: ErrorCorrectionLevel) -> usize {
+    pub fn codeword_count(&self, ecl: &ErrorCorrectionLevel) -> usize {
         match ecl {
             ErrorCorrectionLevel::Low => self.l_cap,
             ErrorCorrectionLevel::Medium => self.m_cap,
@@ -319,7 +322,7 @@ const VERSIONS: [&Version; 40] = [
 pub fn choose_version(
     encoder: &QRBitstreamEncoder,
     ecl: ErrorCorrectionLevel,
-) -> Result<&Version, &str> {
+) -> Result<&'static Version, Error> {
     for version in VERSIONS.iter() {
         let codewords = encoder.codeword_count_before_padding(version.num);
         let cap = match ecl {
@@ -332,7 +335,9 @@ pub fn choose_version(
             return Ok(version);
         }
     }
-    Err("The data is too long for a QR code at that error correction level!")
+    Err(Cow::Borrowed(
+        "The data is too long for a QR code at that error correction level!",
+    ))
 }
 
 #[cfg(test)]
@@ -354,6 +359,17 @@ mod tests {
                 .unwrap()
                 .num,
             1
+        );
+    }
+
+    #[test]
+    fn test_choose_version_medium() {
+        let encoder = QRBitstreamEncoder::new("12300001010ASKOIDGOAS");
+        assert_eq!(
+            choose_version(&encoder, ErrorCorrectionLevel::Medium)
+                .unwrap()
+                .num,
+            2
         );
     }
 

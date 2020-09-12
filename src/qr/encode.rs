@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::min;
 
 use bitvec::prelude::*;
@@ -8,6 +9,7 @@ use QREncoding::*;
 
 use crate::qr::error_correction::ErrorCorrectionLevel;
 use crate::qr::version::Version;
+use crate::qr::Error;
 
 fn div_rem(a: usize, b: usize) -> (usize, usize) {
     (a / b, a % b)
@@ -254,7 +256,11 @@ impl QRBitstreamEncoder {
         ((character_count_bits + (8 - 1)) / 8) as usize // divide rounding up
     }
 
-    pub fn bitstream(&mut self, version: &Version, ecl: ErrorCorrectionLevel) -> QREncodedData {
+    fn bitstream(
+        &mut self,
+        version: &Version,
+        ecl: &ErrorCorrectionLevel,
+    ) -> Result<QREncodedData, Error> {
         let codeword_count = version.codeword_count(ecl);
         let mut bitstream = BitVec::with_capacity(codeword_count * 8);
         let mut mode = self.encoding.mode();
@@ -288,11 +294,11 @@ impl QRBitstreamEncoder {
 
         // Make sure we haven't somehow gone over (if that happened, there's a bug somewhere!)
         if bitstream.len() / 8 > codeword_count {
-            panic!(
+            return Err(Cow::Owned(format!(
                 "The data length of {} doesn't fit into the chosen version of {}!",
                 bitstream.len(),
                 version.num
-            );
+            )));
         }
 
         // Pad remaining codewords with a cycle of 0xEC and 0x11
@@ -301,7 +307,26 @@ impl QRBitstreamEncoder {
             insert_into_data(&mut bitstream, padding_cycle.next().unwrap().to_owned(), 8);
         }
 
-        bitstream
+        Ok(bitstream)
+    }
+
+    pub fn codewords(
+        &mut self,
+        version: &Version,
+        ecl: &ErrorCorrectionLevel,
+    ) -> Result<Vec<u8>, Error> {
+        let bitstream = self.bitstream(&version, &ecl)?;
+        if bitstream.len() % 8 != 0 {
+            Err(Cow::Borrowed(
+                "The bitstream didn't come out in even bytes!",
+            ))
+        } else if bitstream.len() / 8 != version.codeword_count(&ecl) {
+            Err(Cow::Borrowed(
+                "The bitstream doesn't have the right number of codewords for the chosen version!",
+            ))
+        } else {
+            Ok(bitstream.into())
+        }
     }
 }
 
@@ -409,7 +434,9 @@ mod tests {
             assert_eq!(encoder.codeword_count_before_padding(40), 7);
 
             assert_eq!(
-                encoder.bitstream(Version::by_num(1), ErrorCorrectionLevel::Medium),
+                encoder
+                    .bitstream(Version::by_num(1), &ErrorCorrectionLevel::Medium)
+                    .unwrap(),
                 bitvec![Lsb0, u8;
                     0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0,
@@ -443,7 +470,9 @@ mod tests {
             assert_eq!(encoder.codeword_count_before_padding(40), 69);
 
             assert_eq!(
-                encoder.bitstream(Version::by_num(5), ErrorCorrectionLevel::Medium),
+                encoder
+                    .bitstream(Version::by_num(5), &ErrorCorrectionLevel::Medium)
+                    .unwrap(),
                 bitvec![Lsb0, u8;
                     0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0,
                     0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -500,7 +529,9 @@ mod tests {
         fn test_bytes_bitstream() {
             let mut encoder = QRBitstreamEncoder::new("aЉ윇😱");
             assert_eq!(
-                encoder.bitstream(Version::by_num(2), ErrorCorrectionLevel::High),
+                encoder
+                    .bitstream(Version::by_num(2), &ErrorCorrectionLevel::High)
+                    .unwrap(),
                 bitvec![Lsb0, u8;
                     0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0,
                     0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0,
