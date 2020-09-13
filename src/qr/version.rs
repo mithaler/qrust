@@ -6,16 +6,16 @@ use crate::qr::Error;
 
 #[derive(Debug)]
 pub struct VersionGroup {
-    blocks: u8,
-    codewords: u8,
+    pub blocks: u8,
+    pub codewords: u8,
 }
 
 #[derive(Debug)]
 pub struct VersionEclData {
-    data_codewords: usize,
-    ec_codewords_per_block: u8,
-    group1: VersionGroup,
-    group2: Option<VersionGroup>,
+    pub data_codewords: usize,
+    pub ec_codewords_per_block: u8,
+    pub group1: VersionGroup,
+    pub group2: Option<VersionGroup>,
 }
 
 /// A QR code version. All caps are codeword counts.

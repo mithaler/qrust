@@ -323,7 +323,8 @@ impl QRBitstreamEncoder {
                 "The bitstream doesn't have the right number of codewords for the chosen version!",
             ))
         } else {
-            Ok(bitstream.into())
+            // We have to reverse each individual byte to get them to come out right
+            Ok(bitstream.domain().map(|byte| byte.reverse_bits()).collect())
         }
     }
 }
@@ -537,6 +538,24 @@ mod tests {
                     0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0,
                     0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1
                 ]
+            )
+        }
+
+        #[test]
+        fn test_bytes_into_codewords() {
+            let mut encoder =
+                QRBitstreamEncoder::new("Hello, world! I am a weirdly complicated QR code!");
+            assert_eq!(
+                encoder
+                    .codewords(Version::by_num(5), &ErrorCorrectionLevel::Quartile)
+                    .unwrap(),
+                vec![
+                    0x43, 0x14, 0x86, 0x56, 0xC6, 0xC6, 0xF2, 0xC2, 0x07, 0x76, 0xF7, 0x26, 0xC6,
+                    0x42, 0x12, 0x04, 0x92, 0x06, 0x16, 0xD2, 0x06, 0x12, 0x07, 0x76, 0x56, 0x97,
+                    0x26, 0x46, 0xC7, 0x92, 0x06, 0x36, 0xF6, 0xD7, 0x06, 0xC6, 0x96, 0x36, 0x17,
+                    0x46, 0x56, 0x42, 0x05, 0x15, 0x22, 0x06, 0x36, 0xF6, 0x46, 0x52, 0x10, 0xEC,
+                    0x11, 0xEC, 0x11, 0xEC, 0x11, 0xEC, 0x11, 0xEC, 0x11, 0xEC
+                ],
             )
         }
     }
