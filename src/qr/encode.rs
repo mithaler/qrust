@@ -247,7 +247,7 @@ impl QRBitstreamEncoder {
     }
 
     fn bitstream_length_before_terminator(&self, version_num: u8) -> usize {
-        // mode + character count indicator + data + terminator
+        // mode + character count indicator + data
         4 + self.encoding.character_count_bits(version_num) + self.data.len()
     }
 
