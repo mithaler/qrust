@@ -4,18 +4,32 @@ use crate::qr::encode::QRBitstreamEncoder;
 use crate::qr::error_correction::ErrorCorrectionLevel;
 use crate::qr::Error;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct VersionGroup {
     pub blocks: u8,
     pub codewords: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct VersionEclData {
     pub data_codewords: usize,
     pub ec_codewords_per_block: u8,
     pub group1: VersionGroup,
     pub group2: Option<VersionGroup>,
+}
+
+impl VersionEclData {
+    pub fn total_ec_codewords(&self) -> usize {
+        let per_block: usize = self.ec_codewords_per_block.into();
+        let group1 = per_block * self.group1.blocks as usize;
+        let group2 = per_block
+            * self
+                .group2
+                .as_ref()
+                .map(|grp| grp.blocks as usize)
+                .unwrap_or(0);
+        group1 + group2
+    }
 }
 
 /// A QR code version. All caps are codeword counts.
