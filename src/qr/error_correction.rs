@@ -1,11 +1,8 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use bitvec::prelude::*;
-
-use crate::qr::encode::QREncodedData;
 use crate::qr::version::VersionEclData;
-use crate::qr::Error;
+use crate::qr::{bytes_to_bitvec, Error, QREncodedData};
 
 #[derive(Debug)]
 pub enum ErrorCorrectionLevel {
@@ -161,9 +158,9 @@ impl GroupedCodewords {
     }
 
     fn bitstream(&self) -> QREncodedData {
-        let _data = self.interleaved_data_codewords();
-        let _ec = self.interleaved_ec_codewords();
-        bitvec![Lsb0, u8; 0]
+        let mut data = self.interleaved_data_codewords();
+        data.append(&mut self.interleaved_ec_codewords());
+        bytes_to_bitvec(data)
     }
 }
 

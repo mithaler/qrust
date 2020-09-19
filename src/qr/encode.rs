@@ -9,27 +9,10 @@ use QREncoding::*;
 
 use crate::qr::error_correction::ErrorCorrectionLevel;
 use crate::qr::version::Version;
-use crate::qr::Error;
+use crate::qr::{bytes_to_bitvec, insert_into_data, Error, QREncodedData};
 
 fn div_rem(a: usize, b: usize) -> (usize, usize) {
     (a / b, a % b)
-}
-
-pub type QREncodedData = BitVec<Lsb0, u8>;
-
-fn insert_into_data(data: &mut QREncodedData, mut value: u16, count_bits: usize) {
-    for _ in 0..count_bits {
-        data.push(value & 0b1000_0000_0000_0000 > 0);
-        value <<= 1;
-    }
-}
-
-fn bytes_to_bitvec(data: Vec<u8>) -> QREncodedData {
-    let mut out = BitVec::with_capacity(data.len() * 8);
-    for value in data {
-        insert_into_data(&mut out, (value as u16) << 8, 8);
-    }
-    out
 }
 
 #[derive(PartialEq, Debug)]
