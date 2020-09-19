@@ -20,7 +20,7 @@ pub struct VersionEclData {
 
 impl VersionEclData {
     pub fn total_ec_codewords(&self) -> usize {
-        let per_block: usize = self.ec_codewords_per_block.into();
+        let per_block: usize = self.ec_codewords_per_block;
         let group1 = per_block * self.group1.blocks as usize;
         let group2 = per_block
             * self
@@ -29,6 +29,10 @@ impl VersionEclData {
                 .map(|grp| grp.blocks as usize)
                 .unwrap_or(0);
         group1 + group2
+    }
+
+    pub fn max_codewords_per_group(&self) -> usize {
+        (self.group2.as_ref().unwrap_or(&self.group1).codewords).into()
     }
 }
 
