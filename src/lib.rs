@@ -18,7 +18,7 @@ pub fn create_qr_code(data: &str, ecl: ErrorCorrectionLevel) -> Result<(), Error
 }
 
 #[cfg(test)]
-pub(self) fn read_fixture<T: serde::de::DeserializeOwned>(path: &str) -> T {
+pub(self) fn _read_fixture<T: serde::de::DeserializeOwned>(path: &str) -> T {
     let mut fixture_file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     fixture_file.push(path);
     serde_yaml::from_reader(std::fs::File::open(fixture_file).unwrap()).unwrap()

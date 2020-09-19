@@ -13,7 +13,7 @@ pub struct VersionGroup {
 #[derive(Debug, PartialEq)]
 pub struct VersionEclData {
     pub data_codewords: usize,
-    pub ec_codewords_per_block: u8,
+    pub ec_codewords_per_block: usize,
     pub group1: VersionGroup,
     pub group2: Option<VersionGroup>,
 }
