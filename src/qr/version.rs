@@ -67,8 +67,8 @@ impl Version {
     }
 
     /// Returns the number of modules on a single side of the finished QR code.
-    pub fn modules_per_side(&self) -> u32 {
-        (4 * (self.num as u32 - 1)) + 21
+    pub fn modules_per_side(&self) -> usize {
+        ((4 * (self.num - 1)) + 21) as usize
     }
 }
 

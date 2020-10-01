@@ -4,6 +4,7 @@ use bitvec::prelude::*;
 
 pub mod encode;
 pub mod error_correction;
+pub mod pattern;
 pub mod version;
 
 pub type Error = Cow<'static, str>;
