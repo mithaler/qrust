@@ -1,9 +1,11 @@
+use crate::qr::image::save_qrcode;
 use crate::qr::version::Version;
-use crate::qr::QREncodedData;
+use crate::qr::{Error, QREncodedData};
+use std::path::Path;
 
 /// A QR code pixel (the spec calls them "modules" for some reason).
 /// White modules are false, black modules are true.
-enum Module {
+pub enum Module {
     Unset,
     Data(bool),
     Finder(bool),
@@ -13,13 +15,27 @@ enum Module {
     Version(bool),
 }
 
-struct QRCode {
-    version: &'static Version,
-    rows: Vec<Vec<Module>>,
+impl Module {
+    pub fn black(&self) -> bool {
+        match self {
+            Self::Unset => false,
+            Self::Data(black) => *black,
+            Self::Finder(black) => *black,
+            Self::TimingHorizontal(black) => *black,
+            Self::TimingVertical(black) => *black,
+            Self::Alignment(black) => *black,
+            Self::Version(black) => *black,
+        }
+    }
+}
+
+pub struct QRCode {
+    pub version: &'static Version,
+    pub rows: Vec<Vec<Module>>,
 }
 
 impl QRCode {
-    fn module(&self, x: usize, y: usize) -> &Module {
+    fn _module(&self, x: usize, y: usize) -> &Module {
         &self.rows[x][y]
     }
 
@@ -73,7 +89,11 @@ impl QRCode {
         self.insert_finder(0, (((self.version.num as usize - 1) * 4) + 21) - 7);
     }
 
-    pub fn new(version: &'static Version, bitstream: QREncodedData) -> QRCode {
+    pub fn save(&self, path: &Path) -> Result<(), Error> {
+        save_qrcode(self, path)
+    }
+
+    pub fn new(version: &'static Version, _bitstream: QREncodedData) -> QRCode {
         let per_side = version.modules_per_side();
         let mut rows = Vec::with_capacity(per_side);
         rows.resize_with(per_side, || {
@@ -81,6 +101,8 @@ impl QRCode {
             row.resize_with(per_side, || Module::Unset);
             row
         });
-        QRCode { version, rows }
+        let mut code = QRCode { version, rows };
+        code.insert_finders();
+        code
     }
 }

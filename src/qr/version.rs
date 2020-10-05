@@ -2021,7 +2021,7 @@ const VERSIONS: [&Version; 40] = [
 
 pub fn choose_version(
     encoder: &QRBitstreamEncoder,
-    ecl: ErrorCorrectionLevel,
+    ecl: &ErrorCorrectionLevel,
 ) -> Result<&'static Version, Error> {
     for version in VERSIONS.iter() {
         let codewords = encoder.codeword_count_before_padding(version.num);
@@ -2066,7 +2066,7 @@ mod tests {
     fn test_choose_version_low() {
         let encoder = QRBitstreamEncoder::new("12300001010");
         assert_eq!(
-            choose_version(&encoder, ErrorCorrectionLevel::Low)
+            choose_version(&encoder, &ErrorCorrectionLevel::Low)
                 .unwrap()
                 .num,
             1
@@ -2077,7 +2077,7 @@ mod tests {
     fn test_choose_version_medium() {
         let encoder = QRBitstreamEncoder::new("12300001010ASKOIDGOAS");
         assert_eq!(
-            choose_version(&encoder, ErrorCorrectionLevel::Medium)
+            choose_version(&encoder, &ErrorCorrectionLevel::Medium)
                 .unwrap()
                 .num,
             2
@@ -2088,7 +2088,7 @@ mod tests {
     fn test_choose_version_quartile() {
         let encoder = QRBitstreamEncoder::new("12300001010asdfgbasdfsadfASAEDFGSDGSDG");
         assert_eq!(
-            choose_version(&encoder, ErrorCorrectionLevel::Quartile)
+            choose_version(&encoder, &ErrorCorrectionLevel::Quartile)
                 .unwrap()
                 .num,
             4
@@ -2114,7 +2114,7 @@ mod tests {
             8347913151557485724245...",
         );
         assert_eq!(
-            choose_version(&encoder, ErrorCorrectionLevel::High)
+            choose_version(&encoder, &ErrorCorrectionLevel::High)
                 .unwrap()
                 .num,
             38

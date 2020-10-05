@@ -239,7 +239,7 @@ impl QRBitstreamEncoder {
         ((character_count_bits + (8 - 1)) / 8) as usize // divide rounding up
     }
 
-    fn bitstream(
+    pub fn bitstream(
         &mut self,
         version: &Version,
         ecl: &ErrorCorrectionLevel,

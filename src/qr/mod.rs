@@ -4,6 +4,7 @@ use bitvec::prelude::*;
 
 pub mod encode;
 pub mod error_correction;
+pub mod image;
 pub mod pattern;
 pub mod version;
 

@@ -19,6 +19,13 @@ struct Opts {
     input: Option<PathBuf>,
 
     #[structopt(
+        short = "o",
+        parse(from_os_str),
+        help = "Output file to write to; required"
+    )]
+    output: PathBuf,
+
+    #[structopt(
         short = "e",
         long = "ecl",
         help = "Error correction level (low, medium, quartile or high; default medium)"
@@ -37,7 +44,7 @@ fn run(opts: Opts) -> Result<(), Error> {
         .map_err(|e| e.to_string())?;
     let input = data.trim();
     let ecl = opts.ecl.unwrap_or(ErrorCorrectionLevel::Medium);
-    create_qr_code(input, ecl)
+    create_qr_code(input, ecl)?.save(opts.output.as_path())
 }
 
 pub fn main() {
