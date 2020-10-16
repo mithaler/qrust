@@ -8,7 +8,7 @@ const _FIRST_POSITION: i32 = 6;
 /// Calculates the alignment pattern centers, according to Table E.1 of the spec.
 /// Algorithm from StackOverflow:
 /// https://stackoverflow.com/questions/13238704/calculating-the-position-of-qr-code-alignment-patterns/51370697#51370697
-fn _alignment_pattern_centers(version_num: u8) -> Vec<usize> {
+fn alignment_pattern_centers(version_num: u8) -> Vec<usize> {
     let pattern_count = (version_num / 7 + 2) as i32;
     let mut positions = Vec::with_capacity(pattern_count as usize);
     if version_num > 1 {
@@ -26,6 +26,24 @@ fn _alignment_pattern_centers(version_num: u8) -> Vec<usize> {
         }
     }
     positions
+}
+
+type Coordinates = (usize, usize);
+
+/// Returns all the coordiantes of the centers of the alignment patterns for the version number.
+/// Does not exclude the patterns that overlap with finder patterns; the caller must handle that.
+fn alignment_pattern_coordinates(version_num: u8) -> Vec<Coordinates> {
+    let centers = alignment_pattern_centers(version_num);
+    let mut coords = Vec::new();
+    for (i, center) in centers.iter().enumerate() {
+        if i == centers.len() {
+            break;
+        }
+        for next in &centers {
+            coords.push((*center, *next));
+        }
+    }
+    coords
 }
 
 /// A QR code pixel (the spec calls them "modules" for some reason).
@@ -60,7 +78,7 @@ pub struct QRCode {
 }
 
 impl QRCode {
-    fn _module(&self, x: usize, y: usize) -> &Module {
+    fn module(&self, x: usize, y: usize) -> &Module {
         &self.rows[x][y]
     }
 
@@ -127,6 +145,55 @@ impl QRCode {
         self.insert_finder(0, (((self.version.num as usize - 1) * 4) + 21) - 7);
     }
 
+    fn insert_alignment_pattern(&mut self, center_x: usize, center_y: usize) {
+        let (x, mut y) = (center_x - 2, center_y - 2);
+
+        // top row
+        for i in 0..5 {
+            self.set_module(Module::Alignment(true), x + i, y)
+        }
+
+        // second row
+        y += 1;
+        self.set_module(Module::Alignment(true), x, y);
+        for i in 1..3 {
+            self.set_module(Module::Alignment(false), x + i, y)
+        }
+        self.set_module(Module::Alignment(true), x + 4, y);
+
+        // third row
+        y += 1;
+        self.set_module(Module::Alignment(true), x, y);
+        self.set_module(Module::Alignment(false), x + 1, y);
+        self.set_module(Module::Alignment(true), x + 2, y);
+        self.set_module(Module::Alignment(false), x + 3, y);
+        self.set_module(Module::Alignment(true), x + 4, y);
+
+        // fourth row
+        y += 1;
+        self.set_module(Module::Alignment(true), x, y);
+        for i in 1..3 {
+            self.set_module(Module::Alignment(false), x + i, y)
+        }
+        self.set_module(Module::Alignment(true), x + 4, y);
+
+        // last row
+        y += 1;
+        for i in 0..5 {
+            self.set_module(Module::Alignment(true), x + i, y)
+        }
+    }
+
+    fn insert_alignment_patterns(&mut self) {
+        let center_coords = alignment_pattern_coordinates(self.version.num);
+        for (x, y) in center_coords {
+            match self.module(x, y) {
+                Module::Finder(_) => (),
+                _ => self.insert_alignment_pattern(x, y),
+            };
+        }
+    }
+
     pub fn save(&self, path: &Path) -> Result<(), Error> {
         save_qrcode(self, path)
     }
@@ -142,30 +209,51 @@ impl QRCode {
         let mut code = QRCode { version, rows };
         code.insert_finders();
         code.insert_timing_bands();
+        code.insert_alignment_patterns();
         code
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::qr::pattern::_alignment_pattern_centers;
+    use super::*;
 
     #[test]
     fn test_alignment_pattern_centers() {
-        assert_eq!(_alignment_pattern_centers(1), Vec::<usize>::new());
-        assert_eq!(_alignment_pattern_centers(6), vec![6, 34]);
-        assert_eq!(_alignment_pattern_centers(20), vec![6, 34, 62, 90]);
+        assert_eq!(alignment_pattern_centers(1), Vec::<usize>::new());
+        assert_eq!(alignment_pattern_centers(6), vec![6, 34]);
+        assert_eq!(alignment_pattern_centers(20), vec![6, 34, 62, 90]);
+        assert_eq!(alignment_pattern_centers(32), vec![6, 34, 60, 86, 112, 138]);
         assert_eq!(
-            _alignment_pattern_centers(32),
-            vec![6, 34, 60, 86, 112, 138]
-        );
-        assert_eq!(
-            _alignment_pattern_centers(39),
+            alignment_pattern_centers(39),
             vec![6, 26, 54, 82, 110, 138, 166]
         );
         assert_eq!(
-            _alignment_pattern_centers(40),
+            alignment_pattern_centers(40),
             vec![6, 30, 58, 86, 114, 142, 170]
+        );
+    }
+
+    #[test]
+    fn test_alignment_pattern_coordinates() {
+        assert_eq!(alignment_pattern_coordinates(1), Vec::<Coordinates>::new());
+        assert_eq!(
+            alignment_pattern_coordinates(6),
+            vec![(6, 6), (6, 34), (34, 6), (34, 34)]
+        );
+        assert_eq!(
+            alignment_pattern_coordinates(7),
+            vec![
+                (6, 6),
+                (6, 22),
+                (6, 38),
+                (22, 6),
+                (22, 22),
+                (22, 38),
+                (38, 6),
+                (38, 22),
+                (38, 38)
+            ]
         );
     }
 }
