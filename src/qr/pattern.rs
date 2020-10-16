@@ -3,6 +3,31 @@ use crate::qr::version::Version;
 use crate::qr::{Error, QREncodedData};
 use std::path::Path;
 
+const _FIRST_POSITION: i32 = 6;
+
+/// Calculates the alignment pattern centers, according to Table E.1 of the spec.
+/// Algorithm from StackOverflow:
+/// https://stackoverflow.com/questions/13238704/calculating-the-position-of-qr-code-alignment-patterns/51370697#51370697
+fn _alignment_pattern_centers(version_num: u8) -> Vec<usize> {
+    let pattern_count = (version_num / 7 + 2) as i32;
+    let mut positions = Vec::with_capacity(pattern_count as usize);
+    if version_num > 1 {
+        positions.push(_FIRST_POSITION as usize);
+        let matrix_width = (17 + 4 * version_num) as i32;
+        let last_position = matrix_width - 1 - _FIRST_POSITION;
+        let second_last_position =
+            ((_FIRST_POSITION + last_position * (pattern_count - 2) + (pattern_count - 1) / 2)
+                / (pattern_count - 1))
+                & -2;
+        let step = last_position - second_last_position;
+        let second_position = last_position - (pattern_count - 2) * step;
+        for position in (second_position..(last_position + 1)).step_by(step as usize) {
+            positions.push(position as usize);
+        }
+    }
+    positions
+}
+
 /// A QR code pixel (the spec calls them "modules" for some reason).
 /// White modules are false, black modules are true.
 pub enum Module {
@@ -118,5 +143,29 @@ impl QRCode {
         code.insert_finders();
         code.insert_timing_bands();
         code
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::qr::pattern::_alignment_pattern_centers;
+
+    #[test]
+    fn test_alignment_pattern_centers() {
+        assert_eq!(_alignment_pattern_centers(1), Vec::<usize>::new());
+        assert_eq!(_alignment_pattern_centers(6), vec![6, 34]);
+        assert_eq!(_alignment_pattern_centers(20), vec![6, 34, 62, 90]);
+        assert_eq!(
+            _alignment_pattern_centers(32),
+            vec![6, 34, 60, 86, 112, 138]
+        );
+        assert_eq!(
+            _alignment_pattern_centers(39),
+            vec![6, 26, 54, 82, 110, 138, 166]
+        );
+        assert_eq!(
+            _alignment_pattern_centers(40),
+            vec![6, 30, 58, 86, 114, 142, 170]
+        );
     }
 }
