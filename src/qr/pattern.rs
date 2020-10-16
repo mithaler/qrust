@@ -43,6 +43,19 @@ impl QRCode {
         self.rows[x][y] = module;
     }
 
+    fn insert_timing_bands(&mut self) {
+        let mut black = true;
+        for x in 8..(self.version.modules_per_side() - 8) {
+            self.set_module(Module::TimingHorizontal(black), x, 6);
+            black = !black;
+        }
+        black = true;
+        for y in 8..(self.version.modules_per_side() - 8) {
+            self.set_module(Module::TimingVertical(black), 6, y);
+            black = !black;
+        }
+    }
+
     fn insert_finder(&mut self, x: usize, y: usize) {
         // top row
         for i in 0..7 {
@@ -103,6 +116,7 @@ impl QRCode {
         });
         let mut code = QRCode { version, rows };
         code.insert_finders();
+        code.insert_timing_bands();
         code
     }
 }
