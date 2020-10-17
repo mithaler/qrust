@@ -35,10 +35,7 @@ type Coordinates = (usize, usize);
 fn alignment_pattern_coordinates(version_num: u8) -> Vec<Coordinates> {
     let centers = alignment_pattern_centers(version_num);
     let mut coords = Vec::new();
-    for (i, center) in centers.iter().enumerate() {
-        if i == centers.len() {
-            break;
-        }
+    for center in &centers {
         for next in &centers {
             coords.push((*center, *next));
         }
