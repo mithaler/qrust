@@ -71,6 +71,102 @@ impl Module {
             | Self::Version(black) => *black,
         }
     }
+
+    fn zig_zag_skipped(&self) -> bool {
+        match self {
+            Self::Unset | Self::Data(_) => false,
+            Self::Finder(_)
+            | Self::Dark
+            | Self::TimingHorizontal(_)
+            | Self::TimingVertical(_)
+            | Self::Alignment(_)
+            | Self::Format(_)
+            | Self::Version(_) => true,
+        }
+    }
+}
+
+struct ZigZagScanner<'a> {
+    position: Option<Coordinates>,
+    upwards: bool,
+    next_horizontal: bool,
+    code: &'a QRCode,
+}
+
+impl<'a> ZigZagScanner<'a> {
+    pub fn new(code: &QRCode) -> ZigZagScanner {
+        let side_length = code.version.modules_per_side();
+        ZigZagScanner {
+            position: Some((side_length - 1, side_length - 1)),
+            upwards: true,
+            next_horizontal: true,
+            code: &code,
+        }
+    }
+
+    fn switch_directions(&mut self) {
+        self.upwards = !self.upwards;
+    }
+
+    fn compute_next(&mut self, (mut x, mut y): Coordinates) -> Option<Coordinates> {
+        if self.next_horizontal {
+            x -= 1;
+            self.next_horizontal = false;
+        } else {
+            x += 1;
+            self.next_horizontal = true;
+            if self.upwards {
+                match y.checked_sub(1) {
+                    Some(subbed_y) => y = subbed_y,
+                    None => {
+                        self.switch_directions();
+                        x -= 2;
+                    }
+                }
+            } else {
+                y += 1;
+                if y == self.code.version.modules_per_side() - 1 {
+                    self.switch_directions();
+                    match x.checked_sub(2) {
+                        Some(subbed_x) => x = subbed_x,
+                        None => return None,
+                    };
+                }
+            }
+        }
+
+        // Special case: the vertical timing band is always in column 6, so skip it
+        if x == 6 {
+            x -= 1;
+        }
+        Some((x, y))
+    }
+
+    fn next_position_from(&mut self, coords: Coordinates) -> Option<Coordinates> {
+        let mut next_coords = self.compute_next(coords)?;
+        while self.code.module(next_coords).zig_zag_skipped() {
+            next_coords = self.compute_next(next_coords)?;
+        }
+        Some(next_coords)
+    }
+
+    fn next_position(&mut self) -> Option<Coordinates> {
+        if let Some(coords) = self.position {
+            self.next_position_from(coords)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Iterator for ZigZagScanner<'a> {
+    type Item = Coordinates;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_position = self.position;
+        self.position = self.next_position();
+        current_position
+    }
 }
 
 pub struct QRCode {
@@ -85,6 +181,10 @@ impl QRCode {
 
     fn set_module(&mut self, module: Module, (x, y): Coordinates) {
         self.rows[x][y] = module;
+    }
+
+    fn zig_zag_scanner(&self) -> Vec<Coordinates> {
+        ZigZagScanner::new(&self).collect()
     }
 
     fn insert_timing_bands(&mut self) {
@@ -269,11 +369,18 @@ impl QRCode {
         // TODO
     }
 
+    fn insert_data(&mut self, data: &QREncodedData) {
+        let coords_order = self.zig_zag_scanner();
+        for (coords, bit) in coords_order.iter().zip(data.iter()) {
+            self.set_module(Module::Data(*bit), *coords);
+        }
+    }
+
     pub fn save(&self, path: &Path) -> Result<(), Error> {
         save_qrcode(self, path)
     }
 
-    pub fn new(version: &'static Version, _bitstream: QREncodedData) -> QRCode {
+    pub fn new(version: &'static Version, bitstream: QREncodedData) -> QRCode {
         let per_side = version.modules_per_side();
         let mut rows = Vec::with_capacity(per_side);
         rows.resize_with(per_side, || {
@@ -287,6 +394,7 @@ impl QRCode {
         code.insert_alignment_patterns();
         code.insert_format_and_dark();
         code.insert_version_blocks();
+        code.insert_data(&bitstream);
         code
     }
 }
@@ -294,6 +402,8 @@ impl QRCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::qr::encode::QRBitstreamEncoder;
+    use crate::qr::error_correction::ErrorCorrectionLevel;
 
     #[test]
     fn test_alignment_pattern_centers() {
@@ -332,5 +442,43 @@ mod tests {
                 (38, 38)
             ]
         );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_zig_zag_scan_version_1() {
+        let code = QRCode::new(
+            Version::by_num(1),
+            QRBitstreamEncoder::new("Hello, world!")
+                .bitstream(Version::by_num(1), &ErrorCorrectionLevel::Low)
+                .expect("WTFUX"),
+        );
+        let coords = code.zig_zag_scanner();
+        assert_eq!(coords, [
+            (20, 20), (19, 20), (20, 19), (19, 19), (20, 18), (19, 18), (20, 17), (19, 17),
+            (20, 16), (19, 16), (20, 15), (19, 15), (20, 14), (19, 14), (20, 13), (19, 13),
+            (20, 12), (19, 12), (20, 11), (19, 11), (20, 10), (19, 10), (20, 9), (19, 9), (18, 9),
+            (17, 9), (18, 10), (17, 10), (18, 11), (17, 11), (18, 12), (17, 12), (18, 13), (17, 13),
+            (18, 14), (17, 14), (18, 15), (17, 15), (18, 16), (17, 16), (18, 17), (17, 17),
+            (18, 18), (17, 18), (18, 19), (17, 19), (16, 20), (15, 20), (16, 19), (15, 19),
+            (16, 18), (15, 18), (16, 17), (15, 17), (16, 16), (15, 16), (16, 15), (15, 15),
+            (16, 14), (15, 14), (16, 13), (15, 13), (16, 12), (15, 12), (16, 11), (15, 11),
+            (16, 10), (15, 10), (16, 9), (15, 9), (13, 8), (14, 9), (13, 9), (14, 10), (13, 10),
+            (14, 11), (13, 11), (14, 12), (13, 12), (14, 13), (13, 13), (14, 14), (13, 14),
+            (14, 15), (13, 15), (14, 16), (13, 16), (14, 17), (13, 17), (14, 18), (13, 18),
+            (14, 19), (13, 19), (12, 20), (11, 20), (12, 19), (11, 19), (12, 18), (11, 18),
+            (12, 17), (11, 17), (12, 16), (11, 16), (12, 15), (11, 15), (12, 14), (11, 14),
+            (12, 13), (11, 13), (12, 12), (11, 12), (12, 11), (11, 11), (12, 10), (11, 10), (12, 9),
+            (11, 9), (12, 8), (11, 8), (12, 7), (11, 7), (12, 5), (11, 5), (12, 4), (11, 4),
+            (12, 3), (11, 3), (12, 2), (11, 2), (12, 1), (11, 1), (12, 0), (11, 0), (10, 0), (9, 0),
+            (10, 1), (9, 1), (10, 2), (9, 2), (10, 3), (9, 3), (10, 4), (9, 4), (10, 5), (9, 5),
+            (10, 7), (9, 7), (10, 8), (9, 8), (10, 9), (9, 9), (10, 10), (9, 10), (10, 11), (9, 11),
+            (10, 12), (9, 12), (10, 13), (9, 13), (10, 14), (9, 14), (10, 15), (9, 15), (10, 16),
+            (9, 16), (10, 17), (9, 17), (10, 18), (9, 18), (10, 19), (9, 19), (8, 12), (7, 12),
+            (8, 11), (7, 11), (8, 10), (7, 10), (8, 9), (7, 9), (5, 9), (4, 9), (5, 10), (4, 10),
+            (5, 11), (4, 11), (5, 12), (4, 12), (3, 12), (2, 12), (3, 11), (2, 11), (3, 10),
+            (2, 10), (3, 9), (2, 9), (1, 9), (0, 9), (1, 10), (0, 10), (1, 11), (0, 11), (1, 12),
+            (0, 12)
+        ]);
     }
 }
