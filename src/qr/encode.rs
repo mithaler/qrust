@@ -277,11 +277,12 @@ impl QRBitstreamEncoder {
 
         // Make sure we haven't somehow gone over (if that happened, there's a bug somewhere!)
         if bitstream.len() / 8 > codeword_count {
-            return Err(Cow::from(format!(
+            return Err(format!(
                 "The data length of {} doesn't fit into the chosen version of {}!",
                 bitstream.len(),
                 version.num
-            )));
+            )
+            .into());
         }
 
         // Pad remaining codewords with a cycle of 0xEC and 0x11
@@ -300,11 +301,9 @@ impl QRBitstreamEncoder {
     ) -> Result<Vec<u8>, Error> {
         let bitstream = self.bitstream(&version, &ecl)?;
         if bitstream.len() % 8 != 0 {
-            Err(Cow::from("The bitstream didn't come out in even bytes!"))
+            Err("The bitstream didn't come out in even bytes!".into())
         } else if bitstream.len() / 8 != version.codeword_count(&ecl) {
-            Err(Cow::from(
-                "The bitstream doesn't have the right number of codewords for the chosen version!",
-            ))
+            Err("The bitstream has the wrong number of codewords for the version!".into())
         } else {
             // We have to reverse each individual byte to get them to come out right
             Ok(bitstream.domain().map(|byte| byte.reverse_bits()).collect())

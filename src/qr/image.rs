@@ -1,7 +1,6 @@
 use crate::qr::pattern::QRCode;
 use crate::qr::Error;
 use image::{Rgb, RgbImage};
-use std::borrow::Cow;
 use std::path::Path;
 
 const PIXELS_PER_MODULE: u32 = 4;
@@ -24,7 +23,7 @@ fn modules_to_buffer(code: &QRCode) -> RgbImage {
 }
 
 fn save_image(img: &RgbImage, path: &Path) -> Result<(), Error> {
-    img.save(path).map_err(|e| Cow::from(e.to_string()))
+    img.save(path).map_err(|e| e.to_string().into())
 }
 
 pub fn save_qrcode(code: &QRCode, path: &Path) -> Result<(), Error> {

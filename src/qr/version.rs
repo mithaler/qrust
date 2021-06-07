@@ -2030,9 +2030,7 @@ pub fn choose_version(
             return Ok(version);
         }
     }
-    Err(Cow::from(
-        "The data is too long for a QR code at that error correction level!",
-    ))
+    Err("The data is too long for a QR code at that error correction level!".into())
 }
 
 #[cfg(test)]

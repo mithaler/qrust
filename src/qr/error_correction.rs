@@ -21,10 +21,11 @@ impl FromStr for ErrorCorrectionLevel {
             "medium" => Ok(ErrorCorrectionLevel::Medium),
             "quartile" => Ok(ErrorCorrectionLevel::Quartile),
             "high" => Ok(ErrorCorrectionLevel::High),
-            _ => Err(Cow::from(format!(
+            _ => Err(format!(
                 "Unknown error correction level {} (options are low, medium, quartile, high)",
                 s
-            ))),
+            )
+            .into()),
         }
     }
 }
