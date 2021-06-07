@@ -30,7 +30,7 @@ fn alignment_pattern_centers(version_num: u8) -> Vec<usize> {
 
 type Coordinates = (usize, usize);
 
-/// Returns all the coordiantes of the centers of the alignment patterns for the version number.
+/// Returns all the coordinates of the centers of the alignment patterns for the version number.
 /// Does not exclude the patterns that overlap with finder patterns; the caller must handle that.
 fn alignment_pattern_coordinates(version_num: u8) -> Vec<Coordinates> {
     let centers = alignment_pattern_centers(version_num);
@@ -52,6 +52,8 @@ pub enum Module {
     TimingHorizontal(bool),
     TimingVertical(bool),
     Alignment(bool),
+    Format(bool),
+    Dark,
     Version(bool),
 }
 
@@ -59,12 +61,14 @@ impl Module {
     pub fn black(&self) -> bool {
         match self {
             Self::Unset => false,
-            Self::Data(black) => *black,
-            Self::Finder(black) => *black,
-            Self::TimingHorizontal(black) => *black,
-            Self::TimingVertical(black) => *black,
-            Self::Alignment(black) => *black,
-            Self::Version(black) => *black,
+            Self::Dark => true,
+            Self::Data(black)
+            | Self::Finder(black)
+            | Self::TimingHorizontal(black)
+            | Self::TimingVertical(black)
+            | Self::Alignment(black)
+            | Self::Format(black)
+            | Self::Version(black) => *black,
         }
     }
 }
@@ -96,50 +100,86 @@ impl QRCode {
         }
     }
 
-    fn insert_finder(&mut self, x: usize, y: usize) {
+    fn insert_finder(&mut self, (x, y): Coordinates, horiz_backwards: bool, vert_backwards: bool) {
+        let mut curr_row = y;
+
+        // first empty row if on bottom
+        if vert_backwards {
+            for i in 0..7 {
+                self.set_module(Module::Finder(false), (x + i, curr_row - 1));
+            }
+        }
+
         // top row
         for i in 0..7 {
-            self.set_module(Module::Finder(true), (x, y + i))
+            self.set_module(Module::Finder(true), (x + i, curr_row))
         }
 
         // second row
-        self.set_module(Module::Finder(true), (x + 1, y));
+        curr_row += 1;
+        self.set_module(Module::Finder(true), (x, curr_row));
         for i in 1..6 {
-            self.set_module(Module::Finder(false), (x + 1, y + i))
+            self.set_module(Module::Finder(false), (x + i, curr_row))
         }
-        self.set_module(Module::Finder(true), (x + 1, y + 6));
+        self.set_module(Module::Finder(true), (x + 6, curr_row));
 
         // middle three rows
-        for i in 2..5 {
-            self.set_module(Module::Finder(true), (x + i, y));
-            self.set_module(Module::Finder(false), (x + i, y + 1));
-            self.set_module(Module::Finder(true), (x + i, y + 2));
-            self.set_module(Module::Finder(true), (x + i, y + 3));
-            self.set_module(Module::Finder(true), (x + i, y + 4));
-            self.set_module(Module::Finder(false), (x + i, y + 5));
-            self.set_module(Module::Finder(true), (x + i, y + 6));
+        for _ in 2..5 {
+            curr_row += 1;
+            self.set_module(Module::Finder(true), (x, curr_row));
+            self.set_module(Module::Finder(false), (x + 1, curr_row));
+            self.set_module(Module::Finder(true), (x + 2, curr_row));
+            self.set_module(Module::Finder(true), (x + 3, curr_row));
+            self.set_module(Module::Finder(true), (x + 4, curr_row));
+            self.set_module(Module::Finder(false), (x + 5, curr_row));
+            self.set_module(Module::Finder(true), (x + 6, curr_row));
         }
 
         // second to last row
-        self.set_module(Module::Finder(true), (x + 5, y));
+        curr_row += 1;
+        self.set_module(Module::Finder(true), (x, curr_row));
         for i in 1..6 {
-            self.set_module(Module::Finder(false), (x + 5, y + i))
+            self.set_module(Module::Finder(false), (x + i, curr_row))
         }
-        self.set_module(Module::Finder(true), (x + 5, y + 6));
+        self.set_module(Module::Finder(true), (x + 6, curr_row));
 
         // last row
+        curr_row += 1;
         for i in 0..7 {
-            self.set_module(Module::Finder(true), (x + 6, y + i));
+            self.set_module(Module::Finder(true), (x + i, curr_row));
+        }
+
+        // last empty row if on top
+        if !vert_backwards {
+            curr_row += 1;
+            for i in 0..7 {
+                self.set_module(Module::Finder(false), (x + i, curr_row));
+            }
+        }
+
+        // last horizontal column
+        let last_column_x = if horiz_backwards { x - 1 } else { x + 7 };
+        let y_start = if vert_backwards { y - 1 } else { y };
+        for i in 0..8 {
+            self.set_module(Module::Finder(false), (last_column_x, y_start + i));
         }
     }
 
     fn insert_finders(&mut self) {
         // top left
-        self.insert_finder(0, 0);
+        self.insert_finder((0, 0), false, false);
         // top right
-        self.insert_finder((((self.version.num as usize - 1) * 4) + 21) - 7, 0);
+        self.insert_finder(
+            ((((self.version.num as usize - 1) * 4) + 21) - 7, 0),
+            true,
+            false,
+        );
         // bottom left
-        self.insert_finder(0, (((self.version.num as usize - 1) * 4) + 21) - 7);
+        self.insert_finder(
+            (0, (((self.version.num as usize - 1) * 4) + 21) - 7),
+            false,
+            true,
+        );
     }
 
     fn insert_alignment_pattern(&mut self, center_x: usize, center_y: usize) {
@@ -191,6 +231,44 @@ impl QRCode {
         }
     }
 
+    fn insert_format_and_dark(&mut self) {
+        let edge = self.version.modules_per_side() - 1;
+
+        // dark module
+        self.set_module(Module::Dark, (8, edge - 7));
+
+        // TODO: replace with a scanner iterator?
+        // top left
+        for i in 0..8 {
+            let coords = (i, 8);
+            if let Module::TimingVertical(_) = self.module(coords) {
+                continue;
+            }
+            self.set_module(Module::Format(false), coords)
+        }
+        for i in 0..9 {
+            let coords = (8, i);
+            if let Module::TimingHorizontal(_) = self.module(coords) {
+                continue;
+            }
+            self.set_module(Module::Format(false), coords)
+        }
+
+        // bottom left
+        for i in 0..7 {
+            self.set_module(Module::Format(false), (8, edge - i))
+        }
+
+        // top right
+        for i in 0..7 {
+            self.set_module(Module::Format(false), (edge - i, 8))
+        }
+    }
+
+    fn insert_version_blocks(&mut self) {
+        // TODO
+    }
+
     pub fn save(&self, path: &Path) -> Result<(), Error> {
         save_qrcode(self, path)
     }
@@ -207,6 +285,8 @@ impl QRCode {
         code.insert_finders();
         code.insert_timing_bands();
         code.insert_alignment_patterns();
+        code.insert_format_and_dark();
+        code.insert_version_blocks();
         code
     }
 }
