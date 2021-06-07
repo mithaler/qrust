@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::qr::encode::QRBitstreamEncoder;
 use crate::qr::error_correction::ErrorCorrectionLevel;
 use crate::qr::Error;
