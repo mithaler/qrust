@@ -157,10 +157,14 @@ impl GroupedCodewords {
         ec_codewords
     }
 
-    fn bitstream(&self) -> QREncodedData {
+    fn interleaved_codewords(&self) -> Vec<u8> {
         let mut data = self.interleaved_data_codewords();
         data.append(&mut self.interleaved_ec_codewords());
-        bytes_to_bitvec(data)
+        data
+    }
+
+    fn bitstream(&self) -> QREncodedData {
+        bytes_to_bitvec(self.interleaved_codewords())
     }
 }
 
@@ -294,6 +298,26 @@ mod tests {
 
     mod interleaving {
         use super::*;
+        use bitvec::prelude::*;
+
+        #[test]
+        fn test_hello_world() {
+            let version = Version::by_num(1);
+            let ecl = ErrorCorrectionLevel::Low;
+
+            let mut encoder = QRBitstreamEncoder::new("Hello world");
+            let data_codewords = encoder.codewords(version, &ecl).unwrap();
+            let encoder = GroupedCodewords::new(data_codewords, version.values_at_ecl(&ecl));
+            let codewords = encoder.interleaved_codewords();
+
+            assert_eq!(
+                codewords,
+                vec![
+                    0x40, 0xB4, 0x86, 0x56, 0xC6, 0xC6, 0xF2, 0x07, 0x76, 0xF7, 0x26, 0xC6, 0x40,
+                    0xEC, 0x11, 0xEC, 0x11, 0xEC, 0x11, 0x30, 0x0B, 0xF9, 0x21, 0xC1, 0xEA, 0xC5
+                ]
+            )
+        }
 
         #[test]
         fn test_data_no_block2() {
@@ -338,6 +362,30 @@ mod tests {
                     31, 224, 31, 81, 180, 0, 51, 252, 136, 1, 24, 199, 45, 47, 104, 239, 29, 66,
                     188, 165, 191, 239, 208, 100, 139, 248, 136, 14, 107, 244, 8, 60, 185, 134,
                     198, 235, 211, 241
+                ]
+            )
+        }
+
+        #[test]
+        fn test_bitstream() {
+            let version = Version::by_num(1);
+            let ecl = ErrorCorrectionLevel::Low;
+
+            let mut encoder = QRBitstreamEncoder::new("Hello world");
+            let data_codewords = encoder.codewords(version, &ecl).unwrap();
+            let bitstream = bitstream_with_ec(data_codewords, version.values_at_ecl(&ecl));
+
+            assert_eq!(
+                bitstream,
+                bitvec![Lsb0, u8;
+                    0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1,
+                    0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1,
+                    0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1,
+                    1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+                    1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0,
+                    0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1,
+                    0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0,
+                    0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1
                 ]
             )
         }
